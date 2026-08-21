@@ -44,6 +44,7 @@ export class ArenaScene extends Phaser.Scene {
   menuT = 0;
   ended = false;
   grace = 0;
+  dropLock = 0;
   follow?: Fighter;
   fx!: CombatFx;
 
@@ -59,6 +60,7 @@ export class ArenaScene extends Phaser.Scene {
     this.menuT = 0;
     this.ended = false;
     this.grace = 0;
+    this.dropLock = 0;
     this.zone = createZone();
   }
 
@@ -116,6 +118,7 @@ export class ArenaScene extends Phaser.Scene {
       inputRaw.pointerWorld.y = p.worldY;
       const phase = useGameStore.getState().phase;
       if (phase === "drop") {
+        if (this.time.now < this.dropLock) return;
         this.placeDrop(p.worldX, p.worldY);
         return;
       }
@@ -153,6 +156,7 @@ export class ArenaScene extends Phaser.Scene {
     this.ended = false;
     this.dropMarker.setVisible(true);
     this.dropMarker.setPosition(WORLD_CENTER, WORLD_CENTER);
+    this.dropLock = this.time.now + 450;
     useGameStore.getState().setDrop(WORLD_CENTER, WORLD_CENTER);
     useGameStore.getState().setPhase("drop");
     this.layoutCamera();
