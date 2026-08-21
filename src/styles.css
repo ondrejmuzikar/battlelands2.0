@@ -1,0 +1,56 @@
+@import url("https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@600;700;800&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Lilita One", system-ui, sans-serif;
+  --font-sans: "Nunito", system-ui, sans-serif;
+
+  --color-ink: #101820;
+  --color-ink-2: #182430;
+  --color-ink-3: #223140;
+  --color-paper: #f4f0e6;
+  --color-muted: #8b9aab;
+  --color-accent: #ff5a36;
+  --color-accent-fg: #fff7f2;
+  --color-health: #3ddc97;
+  --color-armor: #3ec6ff;
+  --color-storm: #1ec8c8;
+  --color-danger: #ff3b5c;
+  --color-water: #1a8fc4;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+  --radius-xl: 28px;
+}
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+    margin: 0;
+    background: var(--color-ink);
+    color: var(--color-paper);
+    font-family: var(--font-sans);
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
