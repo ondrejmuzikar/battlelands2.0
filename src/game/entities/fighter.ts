@@ -7,26 +7,18 @@ import {
   PLAYER_SPEED,
   SKINS,
   WEAPONS,
-  type AmmoId,
   type SkinId,
   type WeaponId,
 } from "../config";
-import type { AiState, FighterData } from "../types";
+import type { FighterData } from "../types";
 
 export type Fighter = FighterData & {
   sprite: Phaser.Physics.Arcade.Sprite;
   ring: Phaser.GameObjects.Arc;
   chute?: Phaser.GameObjects.Image;
+  shadow?: Phaser.GameObjects.Arc;
+  reloadRing?: Phaser.GameObjects.Graphics;
 };
-
-export function emptyAmmo(): Record<AmmoId, number> {
-  return { light: 0, shell: 0, rifle: 0 };
-}
-
-export function ammoOf(f: Fighter): number {
-  const kind = WEAPONS[f.weapon].ammo;
-  return kind ? f.ammoPool[kind] : 0;
-}
 
 export function createFighter(
   scene: Phaser.Scene,
@@ -44,16 +36,11 @@ export function createFighter(
   sprite.setDamping(true);
   sprite.setDrag(0);
   sprite.setMaxVelocity(isPlayer ? PLAYER_SPEED : BOT_SPEED);
-
-  const color = isPlayer
-    ? SKINS.find((s) => s.id === skin)?.tint ?? 0xffe08a
-    : BOT_COLORS[id % BOT_COLORS.length]!;
+  const color = isPlayer ? (SKINS.find((s) => s.id === skin)?.tint ?? 0xffe08a) : BOT_COLORS[id % BOT_COLORS.length]!;
   sprite.setTint(color);
-
   const ring = scene.add.circle(x, y + 18, 14, color, 0.0);
   ring.setStrokeStyle(3, color, 0.95);
   ring.setDepth(y - 1);
-
   const data: Fighter = {
     id,
     isPlayer,
@@ -64,10 +51,13 @@ export function createFighter(
     armor: 0,
     alive: true,
     weapon: "fists",
-    ammoPool: emptyAmmo(),
+    ammo: 0,
+    clip: 0,
+    reloadT: 0,
     fireCd: 0,
     aim: 0,
     kills: 0,
+    damageDealt: 0,
     aiState: "loot",
     aiTimer: 0,
     targetId: -1,
@@ -79,6 +69,8 @@ export function createFighter(
     fallT: 1,
     dropX: x,
     dropY: y,
+    revealT: 0,
+    looted: false,
     sprite,
     ring,
   };
@@ -86,27 +78,20 @@ export function createFighter(
   return data;
 }
 
-export function setFighterVelocity(f: Fighter, mx: number, my: number, speed: number) {
-  f.sprite.setVelocity(mx * speed, my * speed);
-}
-
 export function faceFromAim(f: Fighter) {
-  const a = f.aim;
-  const deg = Phaser.Math.RadToDeg(Phaser.Math.Angle.Wrap(a));
+  const deg = Phaser.Math.RadToDeg(Phaser.Math.Angle.Wrap(f.aim));
   let dir: "right" | "left" | "down" | "up" = "down";
   if (deg >= -45 && deg < 45) dir = "right";
   else if (deg >= 45 && deg < 135) dir = "down";
   else if (deg >= -135 && deg < -45) dir = "up";
   else dir = "left";
-
   const moving = f.sprite.body && f.sprite.body.velocity.length() > 18;
   const anim = moving ? `walk-${dir}` : undefined;
   if (anim) {
     if (f.sprite.anims.currentAnim?.key !== anim) f.sprite.play(anim, true);
   } else {
     f.sprite.anims.stop();
-    const idle = { down: 0, left: 4, right: 8, up: 12 }[dir];
-    f.sprite.setFrame(idle);
+    f.sprite.setFrame({ down: 0, left: 4, right: 8, up: 12 }[dir]);
   }
 }
 
@@ -118,8 +103,13 @@ export function syncFighterDepth(f: Fighter) {
     f.chute.setPosition(f.sprite.x, f.sprite.y - 42);
     f.chute.setDepth(f.sprite.y + 60);
   }
+  if (f.shadow) {
+    f.shadow.setPosition(f.dropX, f.dropY + 18);
+    f.shadow.setRadius(10 + f.fallT * 28);
+    f.shadow.setVisible(f.falling);
+  }
 }
 
 export function magOf(weapon: WeaponId) {
-  return WEAPONS[weapon].mag === Infinity ? 0 : WEAPONS[weapon].mag;
+  return WEAPONS[weapon].mag;
 }
