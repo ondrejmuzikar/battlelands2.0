@@ -30,9 +30,10 @@ export class PreloadScene extends Phaser.Scene {
 
   create() {
     bakeIcon(this, "bandage", 0xf87171);
-    bakeAmmo(this, "ammo-light", 0xfbbf24);
-    bakeAmmo(this, "ammo-shell", 0xfb7185);
-    bakeAmmo(this, "ammo-rifle", 0x34d399);
+    bakeGun(this, "smg", 0xfbbf24);
+    bakeGun(this, "sniper", 0x38bdf8);
+    bakeGun(this, "bazooka", 0xfb7185);
+    bakeGun(this, "minigun", 0xf59e0b);
     bakeChute(this);
     bakeCrate(this);
     bakeSmoke(this);
@@ -57,14 +58,14 @@ function bakeIcon(scene: Phaser.Scene, key: string, fill: number) {
   g.destroy();
 }
 
-function bakeAmmo(scene: Phaser.Scene, key: string, color: number) {
+function bakeGun(scene: Phaser.Scene, key: string, color: number) {
   const g = scene.add.graphics();
   g.fillStyle(0x101820, 1);
-  g.fillRoundedRect(10, 4, 28, 40, 6);
+  g.fillRoundedRect(4, 16, 40, 16, 5);
   g.fillStyle(color, 1);
-  g.fillRoundedRect(13, 7, 22, 34, 5);
-  g.fillStyle(0xfff7ed, 0.85);
-  g.fillRect(20, 12, 8, 18);
+  g.fillRoundedRect(7, 19, 34, 10, 3);
+  g.fillStyle(0xfff7ed, 1);
+  g.fillRect(36, 20, 8, 4);
   g.generateTexture(key, 48, 48);
   g.destroy();
 }
