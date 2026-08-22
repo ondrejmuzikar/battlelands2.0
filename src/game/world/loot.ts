@@ -9,8 +9,14 @@ const KINDS: PickupKind[] = [
   "shotgun",
   "rifle",
   "medkit",
-  "medkit",
+  "bandage",
+  "bandage",
   "armor",
+  "ammo-light",
+  "ammo-light",
+  "ammo-shell",
+  "ammo-rifle",
+  "ammo-rifle",
 ];
 
 export function scatterLoot(scene: Phaser.Scene, seed = 7): Pickup[] {
@@ -29,7 +35,7 @@ export function scatterLoot(scene: Phaser.Scene, seed = 7): Pickup[] {
     }
   }
 
-  for (let i = 0; i < 18; i++) {
+  for (let i = 0; i < 22; i++) {
     const p = randomLandPoint(rand, ALL_BLOCKERS, 40);
     const kind = KINDS[Math.floor(rand() * KINDS.length)]!;
     list.push(spawnPickup(scene, kind, p.x, p.y));
@@ -37,3 +43,5 @@ export function scatterLoot(scene: Phaser.Scene, seed = 7): Pickup[] {
 
   return list;
 }
+
+export const AIRDROP_LOOT: PickupKind[] = ["rifle", "armor", "medkit", "ammo-rifle", "shotgun"];
