@@ -16,7 +16,7 @@ export function DropBanner() {
             Tap the island to choose your drop
           </p>
           <p className="mt-1 text-xs font-bold text-muted">
-            Land near buildings for loot — or play it safe on the beach.
+            You can steer a little while parachuting. Buildings = loot. Bushes = stealth.
           </p>
         </div>
       </div>
@@ -35,7 +35,7 @@ export function DropBanner() {
             "active:translate-y-0.5 active:shadow-none",
           )}
         >
-          {hasDrop ? "Drop here" : "Pick a spot"}
+          {hasDrop ? "Jump" : "Pick a spot"}
         </button>
       </div>
     </>

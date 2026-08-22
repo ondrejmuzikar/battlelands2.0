@@ -5,9 +5,40 @@ export const PLAYER_COUNT = 12;
 export const PLAYER_SPEED = 228;
 export const BOT_SPEED = 196;
 export const BODY_RADIUS = 16;
-export const PICKUP_RADIUS = 22;
+export const PICKUP_RADIUS = 26;
 export const MAX_HP = 100;
 export const MAX_ARMOR = 75;
+export const PLAY_ZOOM = 1.22;
+export const PLAY_ZOOM_SHORT = 1.08;
+export const FALL_DURATION = 4.2;
+export const FALL_STEER = 210;
+export const BUSH_RADIUS = 38;
+export const AIRDROP_OPEN = 2.6;
+export const AIRDROP_TIMES = [18, 52] as const;
+
+export const SKINS = [
+  { id: "sunny", name: "Sunny", tint: 0xffe08a },
+  { id: "coral", name: "Coral", tint: 0xff6b6b },
+  { id: "mint", name: "Mint", tint: 0x4ade80 },
+  { id: "sky", name: "Sky", tint: 0x38bdf8 },
+  { id: "grape", name: "Grape", tint: 0xc084fc },
+  { id: "mango", name: "Mango", tint: 0xfbbf24 },
+] as const;
+
+export type SkinId = (typeof SKINS)[number]["id"];
+
+export const AMMO = {
+  light: { id: "light", name: "Light", color: "#fbbf24", pack: 18 },
+  shell: { id: "shell", name: "Shells", color: "#fb7185", pack: 8 },
+  rifle: { id: "rifle", name: "Rifle", color: "#34d399", pack: 16 },
+} as const;
+
+export type AmmoId = keyof typeof AMMO;
+
+export const HEALS = {
+  bandage: { amount: 28, duration: 2.6, label: "Bandage" },
+  medkit: { amount: 55, duration: 4.1, label: "Medkit" },
+} as const;
 
 export const WEAPONS = {
   fists: {
@@ -21,6 +52,8 @@ export const WEAPONS = {
     pellets: 1,
     mag: Infinity,
     knockback: 90,
+    ammo: null as AmmoId | null,
+    starter: 0,
   },
   pistol: {
     id: "pistol",
@@ -33,6 +66,8 @@ export const WEAPONS = {
     pellets: 1,
     mag: 12,
     knockback: 40,
+    ammo: "light" as AmmoId | null,
+    starter: 12,
   },
   shotgun: {
     id: "shotgun",
@@ -45,6 +80,8 @@ export const WEAPONS = {
     pellets: 5,
     mag: 6,
     knockback: 140,
+    ammo: "shell" as AmmoId | null,
+    starter: 6,
   },
   rifle: {
     id: "rifle",
@@ -57,6 +94,8 @@ export const WEAPONS = {
     pellets: 1,
     mag: 20,
     knockback: 70,
+    ammo: "rifle" as AmmoId | null,
+    starter: 16,
   },
 } as const;
 

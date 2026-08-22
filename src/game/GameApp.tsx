@@ -19,9 +19,7 @@ export function GameApp() {
     const unlock = () => unlockAudio();
     window.addEventListener("pointerdown", unlock, { once: true });
     window.addEventListener("keydown", unlock, { once: true });
-    return () => {
-      document.removeEventListener("visibilitychange", onVis);
-    };
+    return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
   return (
@@ -34,7 +32,7 @@ export function GameApp() {
           <DropBanner />
         </>
       ) : null}
-      {phase === "playing" ? (
+      {phase === "falling" || phase === "playing" ? (
         <>
           <Hud />
           <VirtualControls />
