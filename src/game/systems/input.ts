@@ -5,20 +5,15 @@ export type Actions = {
   moveY: number;
   aimX: number;
   aimY: number;
+  aimDirX: number;
+  aimDirY: number;
   fire: boolean;
   hasAim: boolean;
 };
 
 const GAME_KEYS = new Set([
-  "KeyW",
-  "KeyA",
-  "KeyS",
-  "KeyD",
-  "ArrowUp",
-  "ArrowLeft",
-  "ArrowDown",
-  "ArrowRight",
-  "Space",
+  "KeyW", "KeyA", "KeyS", "KeyD",
+  "ArrowUp", "ArrowLeft", "ArrowDown", "ArrowRight", "Space",
 ]);
 
 export const inputRaw = {
@@ -27,6 +22,7 @@ export const inputRaw = {
   pointerDown: false,
   hasPointer: false,
   virtualMove: { x: 0, y: 0 },
+  virtualAim: { x: 0, y: 0 },
   virtualFire: false,
   touch: false,
   bound: false,
@@ -35,7 +31,6 @@ export const inputRaw = {
 export function bindInput() {
   if (inputRaw.bound || typeof window === "undefined") return;
   inputRaw.bound = true;
-
   const down = (e: KeyboardEvent) => {
     inputRaw.keys.add(e.code);
     if (GAME_KEYS.has(e.code)) e.preventDefault();
@@ -44,26 +39,31 @@ export function bindInput() {
     inputRaw.keys.delete(e.code);
   };
   const clear = () => inputRaw.keys.clear();
-
   window.addEventListener("keydown", down);
   window.addEventListener("keyup", up);
   window.addEventListener("blur", clear);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) clear();
   });
-  window.addEventListener(
-    "pointerdown",
-    (e) => {
-      if (e.pointerType === "touch") inputRaw.touch = true;
-    },
-    { passive: true },
-  );
+  window.addEventListener("touchstart", () => {
+    inputRaw.touch = true;
+  }, { passive: true });
+  window.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") inputRaw.touch = true;
+  }, { passive: true });
 }
 
 export function setVirtualMove(x: number, y: number) {
   inputRaw.virtualMove.x = x;
   inputRaw.virtualMove.y = y;
   if (x !== 0 || y !== 0) inputRaw.touch = true;
+}
+
+export function setVirtualAim(x: number, y: number, fire: boolean) {
+  inputRaw.virtualAim.x = x;
+  inputRaw.virtualAim.y = y;
+  inputRaw.virtualFire = fire;
+  if (x !== 0 || y !== 0 || fire) inputRaw.touch = true;
 }
 
 export function setVirtualFire(on: boolean) {
@@ -80,28 +80,29 @@ export function sampleActions(): Actions {
   if (inputRaw.keys.has("KeyD") || inputRaw.keys.has("ArrowRight")) mx += 1;
   mx += inputRaw.virtualMove.x;
   my += inputRaw.virtualMove.y;
-
   const len = Math.hypot(mx, my);
   if (len > 1) {
     mx /= len;
     my /= len;
-  } else if (len < 0.18) {
+  } else if (len < 0.16) {
     mx = 0;
     my = 0;
   }
-
+  const aimLen = Math.hypot(inputRaw.virtualAim.x, inputRaw.virtualAim.y);
+  const stickAim = aimLen > 0.18;
   const fire =
     inputRaw.virtualFire ||
     inputRaw.keys.has("Space") ||
     (inputRaw.pointerDown && !inputRaw.touch);
-
   return {
     moveX: mx,
     moveY: my,
     aimX: inputRaw.pointerWorld.x,
     aimY: inputRaw.pointerWorld.y,
+    aimDirX: inputRaw.virtualAim.x,
+    aimDirY: inputRaw.virtualAim.y,
     fire,
-    hasAim: inputRaw.hasPointer && !inputRaw.touch,
+    hasAim: stickAim || (inputRaw.hasPointer && !inputRaw.touch),
   };
 }
 
