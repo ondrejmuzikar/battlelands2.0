@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Shield, Skull, Users, Volume2, VolumeX } from "lucide-react";
-import { MAX_ARMOR, MAX_HP } from "@/game/config";
+import { AMMO, MAX_ARMOR, MAX_HP } from "@/game/config";
 import { useGameStore } from "@/game/store";
 import { Minimap } from "./Minimap";
 import { cn } from "@/lib/utils";
@@ -10,7 +10,7 @@ export function Hud() {
   const muted = useGameStore((s) => s.muted);
   const toggleMute = useGameStore((s) => s.toggleMute);
   const phase = useGameStore((s) => s.phase);
-  const playing = phase === "playing";
+  const showMap = phase === "playing" || phase === "falling" || phase === "victory" || phase === "defeat";
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
@@ -25,6 +25,7 @@ export function Hud() {
             <Skull className="size-3.5 text-muted" />
             <span className="tabular-nums">{hud.kills}</span>
           </Chip>
+          {hud.inBush ? <Chip className="text-health">HIDDEN</Chip> : null}
         </div>
         <div className="pointer-events-auto flex items-center gap-2">
           <Chip className={hud.zoneIn ? "" : "text-danger"}>
@@ -42,42 +43,57 @@ export function Hud() {
         </div>
       </div>
 
-      {playing ? (
+      {showMap ? (
         <div className="absolute top-16 right-[max(0.75rem,env(safe-area-inset-right))]">
           <Minimap />
         </div>
       ) : null}
 
-      <div className="absolute right-0 bottom-0 left-0 flex items-end justify-between gap-3 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
-        <div className="w-44 sm:w-56">
-          <Bar
-            value={hud.hp}
-            max={MAX_HP}
-            color="bg-health"
-            label={`${Math.ceil(hud.hp)}`}
-          />
-          <div className="mt-1.5 flex items-center gap-1.5">
-            <Shield className="size-3 text-armor" />
-            <Bar
-              value={hud.armor}
-              max={MAX_ARMOR}
-              color="bg-armor"
-              label={`${Math.ceil(hud.armor)}`}
-              slim
-            />
+      {phase === "falling" ? (
+        <div className="absolute inset-x-0 top-16 flex justify-center">
+          <Chip>Steer drop · {Math.ceil(hud.fallT * 4.2)}s</Chip>
+        </div>
+      ) : null}
+
+      {hud.crateProgress > 0 ? (
+        <div className="absolute inset-x-0 top-1/3 flex justify-center">
+          <div className="w-40 rounded-lg bg-ink-2/90 p-2 ring-1 ring-paper/15">
+            <p className="mb-1 text-center text-[10px] font-extrabold tracking-wider text-muted uppercase">
+              Opening crate
+            </p>
+            <div className="h-2 overflow-hidden rounded-full bg-ink">
+              <div className="h-full bg-accent" style={{ width: `${hud.crateProgress * 100}%` }} />
+            </div>
           </div>
         </div>
-        {playing ? (
+      ) : null}
+
+      <div className="absolute right-0 bottom-0 left-0 flex items-end justify-between gap-3 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
+        <div className="w-44 sm:w-56">
+          <Bar value={hud.hp} max={MAX_HP} color="bg-health" label={`${Math.ceil(hud.hp)}`} />
+          {hud.healLeft > 0 ? <p className="mt-0.5 text-[10px] font-extrabold text-health">Healing…</p> : null}
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <Shield className="size-3 text-armor" />
+            <Bar value={hud.armor} max={MAX_ARMOR} color="bg-armor" label={`${Math.ceil(hud.armor)}`} slim />
+          </div>
+        </div>
+        {phase === "playing" || phase === "falling" ? (
           <div className="mb-14 rounded-lg bg-ink-2/85 px-3 py-2 text-right ring-1 ring-paper/10 sm:mb-0">
-            <p className="text-[10px] font-extrabold tracking-wider text-muted uppercase">
-              {hud.weapon}
-            </p>
+            <p className="text-[10px] font-extrabold tracking-wider text-muted uppercase">{hud.weapon}</p>
             <p className="font-display text-2xl leading-none tabular-nums text-paper">
               {hud.weapon === "Fists" ? "—" : `${hud.ammo}`}
-              {hud.mag > 0 ? (
-                <span className="text-sm text-muted">/{hud.mag}</span>
-              ) : null}
             </p>
+            <div className="mt-1 flex justify-end gap-1.5 text-[9px] font-extrabold">
+              {(Object.keys(AMMO) as Array<keyof typeof AMMO>).map((k) => (
+                <span
+                  key={k}
+                  className={cn("rounded px-1 py-0.5", hud.ammoType === k ? "bg-ink text-paper" : "text-muted")}
+                  style={{ color: hud.ammoType === k ? AMMO[k].color : undefined }}
+                >
+                  {AMMO[k].name[0]} {hud.ammoPool[k]}
+                </span>
+              ))}
+            </div>
           </div>
         ) : (
           <div />
@@ -87,13 +103,7 @@ export function Hud() {
   );
 }
 
-function Chip({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
+function Chip({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div
       className={cn(
@@ -121,12 +131,7 @@ function Bar({
 }) {
   const pct = Math.max(0, Math.min(100, (value / max) * 100));
   return (
-    <div
-      className={cn(
-        "relative overflow-hidden rounded-md bg-ink/70 ring-1 ring-paper/10",
-        slim ? "h-2.5" : "h-4",
-      )}
-    >
+    <div className={cn("relative overflow-hidden rounded-md bg-ink/70 ring-1 ring-paper/10", slim ? "h-2.5" : "h-4")}>
       <div className={cn("h-full rounded-md", color)} style={{ width: `${pct}%` }} />
       {!slim ? (
         <span className="absolute inset-0 flex items-center justify-end pr-1.5 text-[10px] font-extrabold tabular-nums text-ink">

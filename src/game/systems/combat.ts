@@ -1,8 +1,10 @@
 import Phaser from "phaser";
-import { BODY_RADIUS, MAX_ARMOR, MAX_HP, WEAPONS, type WeaponId } from "../config";
+import { BODY_RADIUS, HEALS, MAX_ARMOR, MAX_HP, WEAPONS, type WeaponId } from "../config";
 import type { Fighter } from "../entities/fighter";
+import { ammoOf } from "../entities/fighter";
 import { Bullet } from "../entities/bullet";
 import { sfxPlay } from "./audio";
+import type { PickupKind } from "../types";
 
 export type CombatFx = {
   shake: (trauma: number) => void;
@@ -17,12 +19,12 @@ export function fireAt(
   angle: number,
   fx: CombatFx,
 ) {
-  if (!fighter.alive || fighter.fireCd > 0) return;
+  if (!fighter.alive || fighter.fireCd > 0 || fighter.falling) return;
   const w = WEAPONS[fighter.weapon];
-  if (w.id !== "fists" && fighter.ammo <= 0) return;
+  if (w.id !== "fists" && ammoOf(fighter) <= 0) return;
 
   fighter.fireCd = 1 / w.rate;
-  if (w.id !== "fists") fighter.ammo -= 1;
+  if (w.ammo) fighter.ammoPool[w.ammo] = Math.max(0, fighter.ammoPool[w.ammo] - 1);
 
   const ox = fighter.sprite.x + Math.cos(angle) * 22;
   const oy = fighter.sprite.y + Math.sin(angle) * 22;
@@ -45,15 +47,8 @@ export function fireAt(
   }
 }
 
-function meleeHit(
-  fighter: Fighter,
-  angle: number,
-  dmg: number,
-  knock: number,
-  fx: CombatFx,
-) {
-  const scene = fighter.sprite.scene as Phaser.Scene & { fighters?: Fighter[] };
-  const list = (scene as unknown as { fighters: Fighter[] }).fighters;
+function meleeHit(fighter: Fighter, angle: number, dmg: number, knock: number, fx: CombatFx) {
+  const list = (fighter.sprite.scene as unknown as { fighters: Fighter[] }).fighters;
   if (!list) return;
   const tx = fighter.sprite.x + Math.cos(angle) * 36;
   const ty = fighter.sprite.y + Math.sin(angle) * 36;
@@ -76,9 +71,11 @@ export function applyDamage(
   fx: CombatFx,
 ) {
   if (!target.alive || target.invuln > 0) return;
+  target.healLeft = 0;
+  target.healRate = 0;
   let left = dmg;
   if (target.armor > 0) {
-    const soak = Math.min(target.armor, left);
+    const soak = Math.min(target.armor, left * 0.7);
     target.armor -= soak;
     left -= soak;
   }
@@ -117,9 +114,22 @@ export function killFighter(target: Fighter, attacker: Fighter | null, fx: Comba
   });
 }
 
-export function heal(target: Fighter, amount: number, fx: CombatFx) {
-  target.hp = Math.min(MAX_HP, target.hp + amount);
-  fx.numbers(target.sprite.x, target.sprite.y - 24, `+${amount}`, "#3ddc97");
+export function startHeal(target: Fighter, kind: "bandage" | "medkit", fx: CombatFx) {
+  const spec = HEALS[kind];
+  target.healLeft = spec.amount;
+  target.healRate = spec.amount / spec.duration;
+  fx.numbers(target.sprite.x, target.sprite.y - 24, spec.label.toUpperCase(), "#3ddc97");
+}
+
+export function tickHeal(target: Fighter, dt: number) {
+  if (target.healLeft <= 0 || !target.alive) return;
+  const step = Math.min(target.healLeft, target.healRate * dt);
+  target.hp = Math.min(MAX_HP, target.hp + step);
+  target.healLeft -= step;
+  if (target.healLeft <= 0) {
+    target.healLeft = 0;
+    target.healRate = 0;
+  }
 }
 
 export function giveArmor(target: Fighter, amount: number, fx: CombatFx) {
@@ -128,9 +138,23 @@ export function giveArmor(target: Fighter, amount: number, fx: CombatFx) {
 }
 
 export function giveWeapon(target: Fighter, weapon: WeaponId, fx: CombatFx) {
+  const w = WEAPONS[weapon];
   target.weapon = weapon;
-  target.ammo = WEAPONS[weapon].mag === Infinity ? 0 : WEAPONS[weapon].mag;
-  fx.numbers(target.sprite.x, target.sprite.y - 24, WEAPONS[weapon].name.toUpperCase(), "#f4f0e6");
+  if (w.ammo) target.ammoPool[w.ammo] += w.starter;
+  fx.numbers(target.sprite.x, target.sprite.y - 24, w.name.toUpperCase(), "#f4f0e6");
+}
+
+export function giveAmmo(target: Fighter, kind: PickupKind, fx: CombatFx) {
+  if (kind === "ammo-light") {
+    target.ammoPool.light += 18;
+    fx.numbers(target.sprite.x, target.sprite.y - 24, "+LIGHT", "#fbbf24");
+  } else if (kind === "ammo-shell") {
+    target.ammoPool.shell += 8;
+    fx.numbers(target.sprite.x, target.sprite.y - 24, "+SHELLS", "#fb7185");
+  } else if (kind === "ammo-rifle") {
+    target.ammoPool.rifle += 16;
+    fx.numbers(target.sprite.x, target.sprite.y - 24, "+RIFLE", "#34d399");
+  }
 }
 
 export function hasLineOfSight(
@@ -152,4 +176,9 @@ export function hasLineOfSight(
     }
   }
   return true;
+}
+
+export function canSee(viewer: Fighter, target: Fighter) {
+  if (target.bushId < 0) return true;
+  return viewer.bushId === target.bushId;
 }
