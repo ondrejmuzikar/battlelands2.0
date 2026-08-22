@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Shield, Skull, Users, Volume2, VolumeX } from "lucide-react";
-import { AMMO, MAX_ARMOR, MAX_HP } from "@/game/config";
+import { MAX_ARMOR, MAX_HP } from "@/game/config";
 import { useGameStore } from "@/game/store";
 import { Minimap } from "./Minimap";
 import { cn } from "@/lib/utils";
@@ -58,9 +58,7 @@ export function Hud() {
       {hud.crateProgress > 0 ? (
         <div className="absolute inset-x-0 top-1/3 flex justify-center">
           <div className="w-40 rounded-lg bg-ink-2/90 p-2 ring-1 ring-paper/15">
-            <p className="mb-1 text-center text-[10px] font-extrabold tracking-wider text-muted uppercase">
-              Opening crate
-            </p>
+            <p className="mb-1 text-center text-[10px] font-extrabold tracking-wider text-muted uppercase">Opening crate</p>
             <div className="h-2 overflow-hidden rounded-full bg-ink">
               <div className="h-full bg-accent" style={{ width: `${hud.crateProgress * 100}%` }} />
             </div>
@@ -81,19 +79,15 @@ export function Hud() {
           <div className="mb-14 rounded-lg bg-ink-2/85 px-3 py-2 text-right ring-1 ring-paper/10 sm:mb-0">
             <p className="text-[10px] font-extrabold tracking-wider text-muted uppercase">{hud.weapon}</p>
             <p className="font-display text-2xl leading-none tabular-nums text-paper">
-              {hud.weapon === "Fists" ? "—" : `${hud.ammo}`}
+              {hud.weapon === "Fists" ? "\u2014" : hud.clip}
+              {hud.weapon !== "Fists" ? <span className="text-sm text-muted">/{hud.ammo}</span> : null}
             </p>
-            <div className="mt-1 flex justify-end gap-1.5 text-[9px] font-extrabold">
-              {(Object.keys(AMMO) as Array<keyof typeof AMMO>).map((k) => (
-                <span
-                  key={k}
-                  className={cn("rounded px-1 py-0.5", hud.ammoType === k ? "bg-ink text-paper" : "text-muted")}
-                  style={{ color: hud.ammoType === k ? AMMO[k].color : undefined }}
-                >
-                  {AMMO[k].name[0]} {hud.ammoPool[k]}
-                </span>
-              ))}
-            </div>
+            {hud.reloadT > 0 ? <p className="text-[10px] font-extrabold text-accent">RELOAD</p> : null}
+            {hud.lootProgress > 0 ? (
+              <p className="text-[10px] font-extrabold text-muted">
+                {hud.lootLabel} {Math.round(hud.lootProgress * 100)}%
+              </p>
+            ) : null}
           </div>
         ) : (
           <div />
@@ -105,12 +99,7 @@ export function Hud() {
 
 function Chip({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div
-      className={cn(
-        "flex h-11 items-center gap-1.5 rounded-lg bg-ink-2/85 px-3 text-sm font-extrabold text-paper ring-1 ring-paper/10",
-        className,
-      )}
-    >
+    <div className={cn("flex h-11 items-center gap-1.5 rounded-lg bg-ink-2/85 px-3 text-sm font-extrabold text-paper ring-1 ring-paper/10", className)}>
       {children}
     </div>
   );
@@ -134,9 +123,7 @@ function Bar({
     <div className={cn("relative overflow-hidden rounded-md bg-ink/70 ring-1 ring-paper/10", slim ? "h-2.5" : "h-4")}>
       <div className={cn("h-full rounded-md", color)} style={{ width: `${pct}%` }} />
       {!slim ? (
-        <span className="absolute inset-0 flex items-center justify-end pr-1.5 text-[10px] font-extrabold tabular-nums text-ink">
-          {label}
-        </span>
+        <span className="absolute inset-0 flex items-center justify-end pr-1.5 text-[10px] font-extrabold tabular-nums text-ink">{label}</span>
       ) : null}
     </div>
   );
