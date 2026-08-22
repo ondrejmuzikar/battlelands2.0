@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { WORLD } from "@/game/config";
 import { useGameStore } from "@/game/store";
 
-const SIZE = 118;
+const SIZE = 128;
 
 export function Minimap() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -29,7 +29,7 @@ export function Minimap() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, SIZE, SIZE);
     ctx.beginPath();
-    ctx.roundRect(0, 0, SIZE, SIZE, 12);
+    ctx.roundRect(0, 0, SIZE, SIZE, 14);
     ctx.clip();
     if (islandRef.current) ctx.drawImage(islandRef.current, 0, 0, SIZE, SIZE);
     else {
@@ -44,12 +44,25 @@ export function Minimap() {
     ctx.arc(hud.zoneX * sx, hud.zoneY * sx, hud.zoneR * sx, 0, Math.PI * 2);
     ctx.stroke();
 
-    for (const f of hud.fighters) {
-      if (!f.alive) continue;
-      ctx.fillStyle = f.isPlayer ? "#ffe08a" : "#ff5a36";
-      const r = f.isPlayer ? 3.4 : 2.2;
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.beginPath();
+    ctx.arc(hud.zoneX * sx, hud.zoneY * sx, Math.max(4, hud.nextZoneR * sx), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    for (const drop of hud.airdrops) {
+      ctx.fillStyle = drop.state === "falling" ? "#fb923c" : "#f97316";
       ctx.beginPath();
-      ctx.arc(f.x * sx, f.y * sx, r, 0, Math.PI * 2);
+      ctx.arc(drop.x * sx, drop.y * sx, 3.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (const f of hud.fighters) {
+      if (!f.alive || f.hidden) continue;
+      ctx.fillStyle = f.isPlayer ? "#ffe08a" : "#ff5a36";
+      ctx.beginPath();
+      ctx.arc(f.x * sx, f.y * sx, f.isPlayer ? 3.6 : 2.2, 0, Math.PI * 2);
       ctx.fill();
     }
   }, [hud]);
@@ -59,7 +72,7 @@ export function Minimap() {
       ref={canvasRef}
       width={SIZE}
       height={SIZE}
-      className="size-[118px] rounded-xl bg-ink-2/80 ring-1 ring-paper/15"
+      className="size-[128px] rounded-xl bg-ink-2/80 shadow-[0_4px_0_#101820] ring-2 ring-paper/20"
     />
   );
 }
