@@ -1,7 +1,6 @@
 import Phaser from "phaser";
 import { BODY_RADIUS, HEALS, MAX_ARMOR, MAX_HP, WEAPONS, type WeaponId } from "../config";
 import type { Fighter } from "../entities/fighter";
-import { ammoOf } from "../entities/fighter";
 import { Bullet } from "../entities/bullet";
 import { sfxPlay } from "./audio";
 import type { PickupKind } from "../types";
@@ -19,12 +18,16 @@ export function fireAt(
   angle: number,
   fx: CombatFx,
 ) {
-  if (!fighter.alive || fighter.fireCd > 0 || fighter.falling) return;
+  if (!fighter.alive || fighter.fireCd > 0 || fighter.falling || fighter.reloadT > 0) return;
   const w = WEAPONS[fighter.weapon];
-  if (w.id !== "fists" && ammoOf(fighter) <= 0) return;
+  if (w.id !== "fists" && fighter.clip <= 0) {
+    beginReload(fighter);
+    return;
+  }
 
   fighter.fireCd = 1 / w.rate;
-  if (w.ammo) fighter.ammoPool[w.ammo] = Math.max(0, fighter.ammoPool[w.ammo] - 1);
+  if (w.id !== "fists") fighter.clip -= 1;
+  fighter.revealT = 0.85;
 
   const ox = fighter.sprite.x + Math.cos(angle) * 22;
   const oy = fighter.sprite.y + Math.sin(angle) * 22;
@@ -44,7 +47,29 @@ export function fireAt(
     const life = (w.range / w.speed) * 1000;
     b.fire(ox, oy, Math.cos(a) * w.speed, Math.sin(a) * w.speed, w.damage, fighter.id, life, w.knockback);
     b.play("bullet-spin", true);
+    if (w.id === "bazooka") b.setDisplaySize(34, 34);
   }
+  if (fighter.clip <= 0) beginReload(fighter);
+}
+
+export function beginReload(fighter: Fighter) {
+  if (fighter.weapon === "fists") return;
+  if (fighter.ammo <= 0 && fighter.clip <= 0) return;
+  if (fighter.reloadT > 0) return;
+  if (fighter.clip >= WEAPONS[fighter.weapon].mag) return;
+  fighter.reloadT = WEAPONS[fighter.weapon].reload;
+}
+
+export function tickReload(fighter: Fighter, dt: number) {
+  if (fighter.reloadT <= 0) return;
+  fighter.reloadT -= dt;
+  if (fighter.reloadT > 0) return;
+  fighter.reloadT = 0;
+  const mag = WEAPONS[fighter.weapon].mag;
+  const need = mag - fighter.clip;
+  const take = Math.min(need, fighter.ammo);
+  fighter.clip += take;
+  fighter.ammo -= take;
 }
 
 function meleeHit(fighter: Fighter, angle: number, dmg: number, knock: number, fx: CombatFx) {
@@ -80,14 +105,14 @@ export function applyDamage(
     left -= soak;
   }
   target.hp -= left;
+  if (attacker) attacker.damageDealt += dmg;
   const body = target.sprite.body as Phaser.Physics.Arcade.Body | null;
   if (body) body.setVelocity(body.velocity.x + kx, body.velocity.y + ky);
   fx.flash(target.sprite);
-  fx.numbers(target.sprite.x, target.sprite.y - 28, `-${Math.round(dmg)}`, "#ff6b7a");
+  fx.numbers(target.sprite.x, target.sprite.y - 28, `-${Math.round(dmg)}`, target.armor > 0 ? "#3ec6ff" : "#ff6b7a");
   fx.impact(target.sprite.x, target.sprite.y);
   sfxPlay.hit();
   if (target.isPlayer) fx.shake(0.34);
-
   if (target.hp <= 0) {
     target.hp = 0;
     killFighter(target, attacker, fx);
@@ -134,27 +159,28 @@ export function tickHeal(target: Fighter, dt: number) {
 
 export function giveArmor(target: Fighter, amount: number, fx: CombatFx) {
   target.armor = Math.min(MAX_ARMOR, target.armor + amount);
-  fx.numbers(target.sprite.x, target.sprite.y - 24, "ARMOR", "#3ec6ff");
+  fx.numbers(target.sprite.x, target.sprite.y - 24, "SHIELD", "#3ec6ff");
 }
 
-export function giveWeapon(target: Fighter, weapon: WeaponId, fx: CombatFx) {
+export function giveWeapon(target: Fighter, weapon: WeaponId, extraAmmo?: number) {
   const w = WEAPONS[weapon];
+  const add = extraAmmo ?? w.starter;
+  if (target.weapon === weapon) {
+    target.ammo += add;
+    return "same" as const;
+  }
+  const prev = target.weapon;
+  const leftover = target.clip + target.ammo;
   target.weapon = weapon;
-  if (w.ammo) target.ammoPool[w.ammo] += w.starter;
-  fx.numbers(target.sprite.x, target.sprite.y - 24, w.name.toUpperCase(), "#f4f0e6");
+  target.clip = Math.min(w.mag, add);
+  target.ammo = Math.max(0, add - target.clip);
+  target.reloadT = 0;
+  return { prev, leftover };
 }
 
-export function giveAmmo(target: Fighter, kind: PickupKind, fx: CombatFx) {
-  if (kind === "ammo-light") {
-    target.ammoPool.light += 18;
-    fx.numbers(target.sprite.x, target.sprite.y - 24, "+LIGHT", "#fbbf24");
-  } else if (kind === "ammo-shell") {
-    target.ammoPool.shell += 8;
-    fx.numbers(target.sprite.x, target.sprite.y - 24, "+SHELLS", "#fb7185");
-  } else if (kind === "ammo-rifle") {
-    target.ammoPool.rifle += 16;
-    fx.numbers(target.sprite.x, target.sprite.y - 24, "+RIFLE", "#34d399");
-  }
+export function pickupKindOfWeapon(id: WeaponId): PickupKind | null {
+  if (id === "fists") return null;
+  return id;
 }
 
 export function hasLineOfSight(
@@ -170,15 +196,14 @@ export function hasLineOfSight(
     const x = x1 + (x2 - x1) * t;
     const y = y1 + (y2 - y1) * t;
     for (const b of blockers) {
-      if (Math.abs(x - b.x) < b.hw + BODY_RADIUS * 0.4 && Math.abs(y - b.y) < b.hh + BODY_RADIUS * 0.4) {
-        return false;
-      }
+      if (Math.abs(x - b.x) < b.hw + BODY_RADIUS * 0.4 && Math.abs(y - b.y) < b.hh + BODY_RADIUS * 0.4) return false;
     }
   }
   return true;
 }
 
 export function canSee(viewer: Fighter, target: Fighter) {
+  if (target.revealT > 0) return true;
   if (target.bushId < 0) return true;
   return viewer.bushId === target.bushId;
 }
