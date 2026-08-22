@@ -1,6 +1,5 @@
 import { BOT_SPEED, WEAPONS } from "../config";
 import type { Fighter } from "../entities/fighter";
-import { ammoOf } from "../entities/fighter";
 import type { Pickup } from "../entities/pickup";
 import { isWeapon } from "../entities/pickup";
 import { canSee, hasLineOfSight } from "./combat";
@@ -32,7 +31,7 @@ export function updateBot(
   } else if (crate && Math.hypot(crate.x - x, crate.y - y) < 520 && Math.random() < 0.55) {
     bot.aiState = "crate";
   } else if (bot.aiTimer <= 0) {
-    const armed = bot.weapon !== "fists" && ammoOf(bot) > 0;
+    const armed = bot.weapon !== "fists" && bot.clip + bot.ammo > 0;
     const threat = nearestVisibleEnemy(bot, fighters, 520);
     if (!armed) bot.aiState = "loot";
     else if (threat) bot.aiState = "fight";
@@ -130,17 +129,16 @@ function nearestPickup(bot: Fighter, pickups: Pickup[]) {
   let best: Pickup | null = null;
   let bestD = Infinity;
   const wantHeal = bot.hp < 55;
-  const wantGun = bot.weapon === "fists" || ammoOf(bot) <= 2;
+  const wantGun = bot.weapon === "fists" || bot.clip + bot.ammo <= 2;
   for (const p of pickups) {
     if (!p.alive) continue;
-    if (wantGun && !isWeapon(p.kind) && !p.kind.startsWith("ammo") && p.kind !== "medkit") continue;
+    if (wantGun && !isWeapon(p.kind) && p.kind !== "medkit") continue;
     if (!wantGun && wantHeal && p.kind !== "medkit" && p.kind !== "bandage" && p.kind !== "armor") continue;
     const dx = p.sprite.x - bot.sprite.x;
     const dy = p.sprite.y - bot.sprite.y;
     const d = dx * dx + dy * dy;
     let score = d;
     if (wantGun && isWeapon(p.kind)) score *= 0.45;
-    if (wantGun && p.kind.startsWith("ammo")) score *= 0.7;
     if (wantHeal && (p.kind === "medkit" || p.kind === "bandage")) score *= 0.4;
     if (score < bestD) {
       bestD = score;

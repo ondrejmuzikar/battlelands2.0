@@ -6,6 +6,9 @@ import { cn } from "@/lib/utils";
 
 export function DropBanner() {
   const hasDrop = useGameStore((s) => s.hasDrop);
+  const left = useGameStore((s) => s.hud.dropLeft);
+  const alive = useGameStore((s) => s.hud.alive);
+  const total = useGameStore((s) => s.hud.total);
 
   return (
     <>
@@ -13,10 +16,10 @@ export function DropBanner() {
         <div className="rounded-xl bg-ink-2/90 px-4 py-3 text-center ring-1 ring-paper/10">
           <p className="flex items-center justify-center gap-2 text-sm font-extrabold text-paper">
             <MapPinned className="size-4 text-accent" />
-            Tap the island to choose your drop
+            Tap landing spot · {Math.ceil(left)}s
           </p>
           <p className="mt-1 text-xs font-bold text-muted">
-            You can steer a little while parachuting. Buildings = loot. Bushes = stealth.
+            Alive {alive}/{total} · steer after jump
           </p>
         </div>
       </div>
