@@ -1,21 +1,36 @@
 import Phaser from "phaser";
 import {
+  AIRDROP_TIMES,
+  FALL_DURATION,
+  FALL_STEER,
+  PLAY_ZOOM,
+  PLAY_ZOOM_SHORT,
   PLAYER_COUNT,
   PLAYER_SPEED,
   WEAPONS,
   WORLD,
   WORLD_CENTER,
 } from "../config";
-import { createFighter, faceFromAim, magOf, syncFighterDepth, type Fighter } from "../entities/fighter";
+import { ammoOf, createFighter, faceFromAim, magOf, syncFighterDepth, type Fighter } from "../entities/fighter";
 import { Bullet } from "../entities/bullet";
-import { isWeapon, type Pickup } from "../entities/pickup";
-import { applyDamage, fireAt, giveArmor, giveWeapon, heal, type CombatFx } from "../systems/combat";
+import { isWeapon, pulsePickup, type Pickup } from "../entities/pickup";
+import {
+  applyDamage,
+  fireAt,
+  giveAmmo,
+  giveArmor,
+  giveWeapon,
+  startHeal,
+  tickHeal,
+  type CombatFx,
+} from "../systems/combat";
 import { updateBot } from "../systems/ai";
 import { bindInput, inputRaw, sampleActions } from "../systems/input";
 import { createZone, drawZone, inZone, updateZone, zoneLabel, type ZoneState } from "../systems/zone";
 import { buildMap } from "../world/mapBuilder";
-import { ALL_BLOCKERS, hitsBlocker, isLand, mulberry32, randomLandPoint } from "../world/mapData";
+import { ALL_BLOCKERS, BUSHES, bushIndexAt, hitsBlocker, isLand, mulberry32, randomLandPoint } from "../world/mapData";
 import { scatterLoot } from "../world/loot";
+import { destroyAirdrop, finishOpen, spawnAirdrop, tickOpen, updateAirdrop, type Airdrop } from "../entities/airdrop";
 import { useGameStore } from "../store";
 import { sfxPlay } from "../systems/audio";
 import { registerArena } from "../api";
@@ -33,11 +48,13 @@ export class ArenaScene extends Phaser.Scene {
   fighters: Fighter[] = [];
   player!: Fighter;
   pickups: Pickup[] = [];
+  drops: Airdrop[] = [];
   bullets!: Phaser.Physics.Arcade.Group;
   staticGroup!: Phaser.Physics.Arcade.StaticGroup;
   actors!: Phaser.Physics.Arcade.Group;
   zoneGfx!: Phaser.GameObjects.Graphics;
   dropMarker!: Phaser.GameObjects.Arc;
+  bushSprites: Phaser.GameObjects.Image[] = [];
   zone!: ZoneState;
   trauma = 0;
   hudAcc = 0;
@@ -45,6 +62,9 @@ export class ArenaScene extends Phaser.Scene {
   ended = false;
   grace = 0;
   dropLock = 0;
+  matchT = 0;
+  nextDrop = 0;
+  crateProgress = 0;
   follow?: Fighter;
   fx!: CombatFx;
 
@@ -55,12 +75,16 @@ export class ArenaScene extends Phaser.Scene {
   init() {
     this.fighters = [];
     this.pickups = [];
+    this.drops = [];
     this.trauma = 0;
     this.hudAcc = 0;
     this.menuT = 0;
     this.ended = false;
     this.grace = 0;
     this.dropLock = 0;
+    this.matchT = 0;
+    this.nextDrop = 0;
+    this.crateProgress = 0;
     this.zone = createZone();
   }
 
@@ -68,16 +92,12 @@ export class ArenaScene extends Phaser.Scene {
     bindInput();
     const map = buildMap(this);
     this.staticGroup = map.staticGroup;
+    this.bushSprites = map.bushSprites;
     this.cameras.main.setBounds(0, 0, WORLD, WORLD);
     this.cameras.main.setRoundPixels(true);
 
-    this.bullets = this.physics.add.group({
-      classType: Bullet,
-      maxSize: 96,
-      runChildUpdate: true,
-    });
+    this.bullets = this.physics.add.group({ classType: Bullet, maxSize: 96, runChildUpdate: true });
     this.actors = this.physics.add.group();
-
     this.zoneGfx = this.add.graphics().setDepth(8);
     this.dropMarker = this.add.circle(WORLD_CENTER, WORLD_CENTER, 16, 0xff5a36, 0.15);
     this.dropMarker.setStrokeStyle(3, 0xff5a36, 1);
@@ -90,7 +110,12 @@ export class ArenaScene extends Phaser.Scene {
       },
       flash: (sprite) => {
         sprite.setTintFill(0xffffff);
-        this.time.delayedCall(50, () => sprite.clearTint());
+        this.time.delayedCall(50, () => {
+          const fid = sprite.getData("fid") as number;
+          const f = this.fighters.find((x) => x.id === fid);
+          sprite.clearTint();
+          if (f) sprite.setTint(f.color);
+        });
       },
       numbers: (x, y, text, color) => this.spawnFloat(x, y, text, color),
       impact: (x, y) => {
@@ -134,19 +159,14 @@ export class ArenaScene extends Phaser.Scene {
     });
 
     this.scale.on("resize", () => this.layoutCamera());
-
     registerArena(this);
     useGameStore.getState().setReady(true);
-    if (useGameStore.getState().phase === "booting") {
-      useGameStore.getState().setPhase("menu");
-    }
-
+    if (useGameStore.getState().phase === "booting") useGameStore.getState().setPhase("menu");
     this.events.once("shutdown", () => {
       this.fighters.length = 0;
       this.pickups.length = 0;
       registerArena(null);
     });
-
     this.exposeControls();
   }
 
@@ -164,9 +184,7 @@ export class ArenaScene extends Phaser.Scene {
 
   confirmDrop() {
     const store = useGameStore.getState();
-    const x = store.hasDrop ? store.dropX : WORLD_CENTER;
-    const y = store.hasDrop ? store.dropY : WORLD_CENTER;
-    this.startMatch(x, y);
+    this.startMatch(store.hasDrop ? store.dropX : WORLD_CENTER, store.hasDrop ? store.dropY : WORLD_CENTER);
   }
 
   startMatch(px: number, py: number) {
@@ -174,12 +192,16 @@ export class ArenaScene extends Phaser.Scene {
     this.zone = createZone();
     this.ended = false;
     this.grace = 4.2;
+    this.matchT = 0;
+    this.nextDrop = 0;
+    this.crateProgress = 0;
     this.dropMarker.setVisible(false);
-    sfxPlay.land();
 
     const rand = mulberry32((Date.now() & 0xffff) ^ 0x9e3779);
-    this.player = createFighter(this, 0, px, py, true);
+    const skin = useGameStore.getState().skin;
+    this.player = createFighter(this, 0, px, py, true, skin);
     this.player.invuln = 2.6;
+    this.armFall(this.player, px, py);
     this.fighters = [this.player];
     this.actors.add(this.player.sprite);
     this.physics.add.collider(this.player.sprite, this.staticGroup);
@@ -188,6 +210,7 @@ export class ArenaScene extends Phaser.Scene {
       const p = spawnAwayFrom(rand, px, py, 340);
       const bot = createFighter(this, i, p.x, p.y, false);
       bot.invuln = 1.2;
+      this.armFall(bot, p.x, p.y);
       this.fighters.push(bot);
       this.actors.add(bot.sprite);
       this.physics.add.collider(bot.sprite, this.staticGroup);
@@ -199,9 +222,9 @@ export class ArenaScene extends Phaser.Scene {
 
     this.pickups = scatterLoot(this, 11 + (Date.now() % 50));
     this.follow = this.player;
-    this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.12);
+    this.cameras.main.startFollow(this.player.sprite, true, 0.14, 0.14);
     this.layoutCamera();
-    useGameStore.getState().setPhase("playing");
+    useGameStore.getState().setPhase("falling");
     this.syncHud(1);
   }
 
@@ -217,16 +240,28 @@ export class ArenaScene extends Phaser.Scene {
     this.layoutCamera();
   }
 
+  private armFall(f: Fighter, x: number, y: number) {
+    f.falling = true;
+    f.fallT = 1;
+    f.dropX = x;
+    f.dropY = y;
+    f.sprite.setPosition(x, y);
+    f.sprite.setVelocity(0, 0);
+    f.sprite.setScale(1.85);
+    f.chute = this.add.image(x, y - 42, "parachute").setDisplaySize(58, 48).setDepth(y + 60);
+  }
+
   private clearMatchSprites() {
     for (const f of this.fighters) {
       f.sprite.destroy();
       f.ring.destroy();
+      f.chute?.destroy();
     }
     this.fighters = [];
-    for (const p of this.pickups) {
-      p.sprite.destroy();
-    }
+    for (const p of this.pickups) p.sprite.destroy();
     this.pickups = [];
+    for (const d of this.drops) destroyAirdrop(d);
+    this.drops = [];
     this.bullets.clear(true, true);
     this.actors?.clear(false);
     this.zoneGfx.clear();
@@ -243,7 +278,7 @@ export class ArenaScene extends Phaser.Scene {
     if (!bullet.active) return;
     const fid = sprite.getData("fid") as number;
     const target = this.fighters.find((f) => f.id === fid);
-    if (!target || !target.alive || target.id === bullet.ownerId) return;
+    if (!target || !target.alive || target.id === bullet.ownerId || target.falling) return;
     const owner = this.fighters.find((f) => f.id === bullet.ownerId) ?? null;
     const nx = bullet.body?.velocity.x ?? 0;
     const ny = bullet.body?.velocity.y ?? 0;
@@ -261,10 +296,7 @@ export class ArenaScene extends Phaser.Scene {
       this.menuT += dt;
       const cam = this.cameras.main;
       cam.stopFollow();
-      cam.centerOn(
-        WORLD_CENTER + Math.cos(this.menuT * 0.18) * 220,
-        WORLD_CENTER + Math.sin(this.menuT * 0.13) * 160,
-      );
+      cam.centerOn(WORLD_CENTER + Math.cos(this.menuT * 0.18) * 220, WORLD_CENTER + Math.sin(this.menuT * 0.13) * 160);
       this.layoutCamera(0.42);
       this.applyShake(dt);
       return;
@@ -278,12 +310,18 @@ export class ArenaScene extends Phaser.Scene {
 
     if (!this.player) return;
 
-    if (phase === "playing") {
+    if (phase === "falling") {
+      this.updateFalling(dt);
+      this.layoutCamera();
+    } else if (phase === "playing") {
+      this.matchT += dt;
       updateZone(this.zone, dt);
       drawZone(this.zoneGfx, this.zone);
       this.updatePlayer(dt);
       this.updateBots(dt);
+      this.updateStealth();
       this.collectPickups();
+      this.updateDrops(dt);
       this.applyZoneDamage(dt);
     } else if (this.follow?.alive) {
       drawZone(this.zoneGfx, this.zone);
@@ -293,6 +331,7 @@ export class ArenaScene extends Phaser.Scene {
       if (!f.alive) continue;
       f.invuln = Math.max(0, f.invuln - dt);
       f.fireCd = Math.max(0, f.fireCd - dt);
+      tickHeal(f, dt);
       faceFromAim(f);
       syncFighterDepth(f);
     }
@@ -302,23 +341,57 @@ export class ArenaScene extends Phaser.Scene {
     if (phase === "playing") this.checkEnd();
   }
 
+  private updateFalling(dt: number) {
+    let anyFalling = false;
+    for (const f of this.fighters) {
+      if (!f.falling) continue;
+      anyFalling = true;
+      f.fallT = Math.max(0, f.fallT - dt / FALL_DURATION);
+      if (f.isPlayer) {
+        const a = sampleActions();
+        f.dropX = Phaser.Math.Clamp(f.dropX + a.moveX * FALL_STEER * dt, 160, WORLD - 160);
+        f.dropY = Phaser.Math.Clamp(f.dropY + a.moveY * FALL_STEER * dt, 160, WORLD - 160);
+        if (!isLand(f.dropX, f.dropY)) {
+          const dx = f.dropX - WORLD_CENTER;
+          const dy = f.dropY - WORLD_CENTER;
+          const len = Math.hypot(dx, dy) || 1;
+          f.dropX = WORLD_CENTER + (dx / len) * 1000;
+          f.dropY = WORLD_CENTER + (dy / len) * 1000;
+        }
+        if (a.moveX || a.moveY) f.aim = Math.atan2(a.moveY, a.moveX);
+      } else {
+        f.dropX += Math.sin(f.id + this.matchT) * 18 * dt;
+        f.dropY += Math.cos(f.id + this.matchT) * 18 * dt;
+      }
+      f.sprite.setPosition(f.dropX, f.dropY);
+      f.sprite.setVelocity(0, 0);
+      f.sprite.setScale(1 + f.fallT * 0.85);
+      if (f.fallT <= 0) {
+        f.falling = false;
+        f.sprite.setScale(1);
+        f.chute?.destroy();
+        f.chute = undefined;
+        f.invuln = Math.max(f.invuln, 0.8);
+        if (f.isPlayer) sfxPlay.land();
+      }
+    }
+    if (!anyFalling) {
+      useGameStore.getState().setPhase("playing");
+      this.layoutCamera();
+    }
+  }
+
   private updatePlayer(_dt: number) {
     const p = this.player;
-    if (!p.alive) return;
+    if (!p.alive || p.falling) return;
     const a = sampleActions();
     p.sprite.setVelocity(a.moveX * PLAYER_SPEED, a.moveY * PLAYER_SPEED);
-
-    if (a.hasAim) {
-      p.aim = Math.atan2(a.aimY - p.sprite.y, a.aimX - p.sprite.x);
-    } else if (a.moveX !== 0 || a.moveY !== 0) {
-      p.aim = Math.atan2(a.moveY, a.moveX);
-    }
-
+    if (a.hasAim) p.aim = Math.atan2(a.aimY - p.sprite.y, a.aimX - p.sprite.x);
+    else if (a.moveX !== 0 || a.moveY !== 0) p.aim = Math.atan2(a.moveY, a.moveX);
     if (inputRaw.touch && a.fire) {
-      const enemy = this.nearestEnemy(p, 640);
+      const enemy = this.nearestVisibleEnemy(p, 640);
       if (enemy) p.aim = Math.atan2(enemy.sprite.y - p.sprite.y, enemy.sprite.x - p.sprite.x);
     }
-
     if (a.fire) fireAt(this.bullets, p, p.aim, this.fx);
   }
 
@@ -327,10 +400,32 @@ export class ArenaScene extends Phaser.Scene {
     for (const bot of this.fighters) {
       if (bot.isPlayer) continue;
       const fire =
-        this.grace > 0
-          ? () => undefined
-          : (b: Fighter, angle: number) => fireAt(this.bullets, b, angle, this.fx);
-      updateBot(bot, dt, this.fighters, this.pickups, this.zone, ALL_BLOCKERS, fire);
+        this.grace > 0 ? () => undefined : (b: Fighter, angle: number) => fireAt(this.bullets, b, angle, this.fx);
+      updateBot(bot, dt, this.fighters, this.pickups, this.zone, ALL_BLOCKERS, fire, this.drops);
+    }
+  }
+
+  private updateStealth() {
+    for (const f of this.fighters) {
+      if (!f.alive) continue;
+      f.bushId = bushIndexAt(f.sprite.x, f.sprite.y);
+    }
+    const pBush = this.player?.bushId ?? -1;
+    for (const f of this.fighters) {
+      if (!f.alive) continue;
+      if (f.isPlayer) {
+        f.sprite.setAlpha(f.bushId >= 0 ? 0.62 : 1);
+        continue;
+      }
+      const hidden = f.bushId >= 0 && f.bushId !== pBush;
+      f.sprite.setAlpha(hidden ? 0 : 1);
+      f.ring.setVisible(!hidden);
+    }
+    for (let i = 0; i < BUSHES.length; i++) {
+      const spr = this.bushSprites[i];
+      if (!spr) continue;
+      const moving = this.fighters.some((f) => f.alive && f.bushId === i && (f.sprite.body?.velocity.length() ?? 0) > 20);
+      spr.setScale(moving ? 1.06 : 1);
     }
   }
 
@@ -338,35 +433,66 @@ export class ArenaScene extends Phaser.Scene {
     for (const item of this.pickups) {
       if (!item.alive) continue;
       for (const f of this.fighters) {
-        if (!f.alive) continue;
+        if (!f.alive || f.falling) continue;
         const dx = f.sprite.x - item.sprite.x;
         const dy = f.sprite.y - item.sprite.y;
         if (dx * dx + dy * dy > 28 * 28) continue;
         item.alive = false;
+        pulsePickup(this, item.sprite.x, item.sprite.y);
         item.sprite.destroy();
         sfxPlay.pickup();
-        if (item.kind === "medkit") heal(f, 40, this.fx);
+        if (item.kind === "medkit") startHeal(f, "medkit", this.fx);
+        else if (item.kind === "bandage") startHeal(f, "bandage", this.fx);
         else if (item.kind === "armor") giveArmor(f, 50, this.fx);
         else if (isWeapon(item.kind)) giveWeapon(f, item.kind, this.fx);
+        else giveAmmo(f, item.kind, this.fx);
         break;
+      }
+    }
+  }
+
+  private updateDrops(dt: number) {
+    if (this.nextDrop < AIRDROP_TIMES.length && this.matchT >= AIRDROP_TIMES[this.nextDrop]!) {
+      const rand = mulberry32((Date.now() + this.nextDrop * 97) >>> 0);
+      const p = randomLandPoint(rand, ALL_BLOCKERS, 50);
+      this.drops.push(spawnAirdrop(this, p.x, p.y));
+      this.nextDrop += 1;
+      sfxPlay.click();
+    }
+    this.crateProgress = 0;
+    for (const drop of this.drops) {
+      updateAirdrop(drop, dt);
+      if (drop.state === "opened" || drop.state === "falling") continue;
+      let opener: Fighter | null = null;
+      for (const f of this.fighters) {
+        if (!f.alive || f.falling) continue;
+        if (Math.hypot(f.sprite.x - drop.x, f.sprite.y - drop.y) < 34) {
+          opener = f;
+          break;
+        }
+      }
+      const p = tickOpen(drop, !!opener, dt);
+      if (opener?.isPlayer) this.crateProgress = p;
+      if (p >= 1) {
+        this.pickups.push(...finishOpen(this, drop));
+        pulsePickup(this, drop.x, drop.y, 0xff8a3c);
       }
     }
   }
 
   private applyZoneDamage(dt: number) {
     for (const f of this.fighters) {
-      if (!f.alive) continue;
-      if (!inZone(this.zone, f.sprite.x, f.sprite.y)) {
-        applyDamage(f, this.zone.dmg * dt, null, 0, 0, this.fx);
-      }
+      if (!f.alive || f.falling) continue;
+      if (!inZone(this.zone, f.sprite.x, f.sprite.y)) applyDamage(f, this.zone.dmg * dt, null, 0, 0, this.fx);
     }
   }
 
-  private nearestEnemy(self: Fighter, max: number) {
+  private nearestVisibleEnemy(self: Fighter, max: number) {
     let best: Fighter | null = null;
     let bestD = max * max;
     for (const f of this.fighters) {
       if (f.id === self.id || !f.alive) continue;
+      if (f.bushId >= 0 && f.bushId !== self.bushId) continue;
       const dx = f.sprite.x - self.sprite.x;
       const dy = f.sprite.y - self.sprite.y;
       const d = dx * dx + dy * dy;
@@ -411,14 +537,16 @@ export class ArenaScene extends Phaser.Scene {
       return;
     }
     if (phase === "drop" || phase === "menu" || phase === "booting") {
-      const z = Math.min(w / WORLD, h / WORLD) * (phase === "drop" ? 0.96 : 0.5);
-      cam.setZoom(z);
+      cam.setZoom(Math.min(w / WORLD, h / WORLD) * (phase === "drop" ? 0.96 : 0.5));
       cam.centerOn(WORLD_CENTER, WORLD_CENTER);
       cam.stopFollow();
       return;
     }
-    const z = h < 700 ? 0.92 : 1.05;
-    cam.setZoom(z);
+    if (phase === "falling") {
+      cam.setZoom(h < 700 ? 0.78 : 0.88);
+      return;
+    }
+    cam.setZoom(h < 700 ? PLAY_ZOOM_SHORT : PLAY_ZOOM);
   }
 
   private applyShake(dt: number) {
@@ -460,8 +588,10 @@ export class ArenaScene extends Phaser.Scene {
     const snap: HudSnapshot = {
       hp: Math.max(0, p.hp),
       armor: Math.max(0, p.armor),
-      ammo: p.ammo,
+      ammo: ammoOf(p),
       mag: magOf(p.weapon),
+      ammoType: WEAPONS[p.weapon].ammo,
+      ammoPool: { ...p.ammoPool },
       weapon: WEAPONS[p.weapon].name,
       alive,
       total: PLAYER_COUNT,
@@ -475,14 +605,26 @@ export class ArenaScene extends Phaser.Scene {
       zoneY: this.zone.y,
       zoneR: this.zone.r,
       nextZoneR: this.zone.toR,
-      loadout: p.weapon === "fists" ? "fists" : p.weapon,
+      loadout: p.weapon,
       fighters: this.fighters.map((f) => ({
         x: f.sprite.x,
         y: f.sprite.y,
         isPlayer: f.isPlayer,
         alive: f.alive,
         color: f.color,
+        hidden: f.bushId >= 0 && f.bushId !== p.bushId && !f.isPlayer,
       })),
+      airdrops: this.drops
+        .filter((d) => d.state !== "opened")
+        .map((d) => ({
+          x: d.crate.x,
+          y: d.crate.y,
+          state: d.state === "opening" ? "opening" : d.state === "falling" ? "falling" : "landed",
+        })),
+      crateProgress: this.crateProgress,
+      healLeft: p.healLeft,
+      inBush: p.bushId >= 0,
+      fallT: p.fallT,
     };
     useGameStore.getState().setHud(snap);
   }
@@ -491,10 +633,7 @@ export class ArenaScene extends Phaser.Scene {
     window.__controlsTest = {
       getYaw: () => this.player?.aim ?? 0,
       getSpeed: () => this.player?.sprite.body?.velocity.length() ?? 0,
-      getPos: () => ({
-        x: this.player?.sprite.x ?? 0,
-        y: this.player?.sprite.y ?? 0,
-      }),
+      getPos: () => ({ x: this.player?.sprite.x ?? 0, y: this.player?.sprite.y ?? 0 }),
       setKeys: (codes) => {
         inputRaw.keys.clear();
         for (const c of codes) inputRaw.keys.add(c);
@@ -502,4 +641,3 @@ export class ArenaScene extends Phaser.Scene {
     };
   }
 }
-
